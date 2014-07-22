@@ -21,12 +21,15 @@ type formatter struct {
 
 // Formatter makes a wrapper, f, that will format x as go source with line
 // breaks and tabs. Object f responds to the "%v" formatting verb when both the
-// "#" and " " (space) flags are set, for example:
+// "#" flag and either the " " (space) or "-" (minus) flags are set, for example:
 //
 //     fmt.Sprintf("%# v", Formatter(x))
+//     fmt.Sprintf("%#-v", Formatter(x))
 //
-// If one of these two flags is not set, or any other verb is used, f will
-// format x according to the usual rules of package fmt.
+// The space flag sets indented multi-line output. The minus flag prints similar
+// output all on a single line. If the combination of two flags is not set, or
+// any other verb is used, f will format x according to the usual rules of
+// package fmt.
 // In particular, if x satisfies fmt.Formatter, then x.Format will be called.
 func Formatter(x interface{}) (f fmt.Formatter) {
 	return formatter{x: x, quote: true}
@@ -54,19 +57,27 @@ func (fo formatter) passThrough(f fmt.State, c rune) {
 }
 
 func (fo formatter) Format(f fmt.State, c rune) {
-	if fo.force || c == 'v' && f.Flag('#') && f.Flag(' ') {
-		w := tabwriter.NewWriter(f, 4, 4, 1, ' ', 0)
-		p := &printer{tw: w, Writer: w}
-		p.printValue(reflect.ValueOf(fo.x), true, fo.quote)
-		w.Flush()
-		return
+	if fo.force || c == 'v' && f.Flag('#') {
+		switch {
+		case fo.force || f.Flag(' '):
+			w := tabwriter.NewWriter(f, 4, 4, 1, ' ', 0)
+			p := &printer{tw: w, Writer: w, indented: true}
+			p.printValue(reflect.ValueOf(fo.x), true, fo.quote)
+			w.Flush()
+			return
+		case f.Flag('-'):
+			p := &printer{tw: f, Writer: f}
+			p.printValue(reflect.ValueOf(fo.x), true, fo.quote)
+			return
+		}
 	}
 	fo.passThrough(f, c)
 }
 
 type printer struct {
 	io.Writer
-	tw *tabwriter.Writer
+	tw       io.Writer
+	indented bool
 }
 
 func (p *printer) indent() *printer {
@@ -106,7 +117,7 @@ func (p *printer) printValue(v reflect.Value, showType, quote bool) {
 		}
 		writeByte(p, '{')
 		if nonzero(v) {
-			expand := !canInline(v.Type())
+			expand := p.indented && !canInline(v.Type())
 			pp := p
 			if expand {
 				writeByte(p, '\n')
@@ -131,7 +142,9 @@ func (p *printer) printValue(v reflect.Value, showType, quote bool) {
 				}
 			}
 			if expand {
-				pp.tw.Flush()
+				if tw, ok := pp.tw.(flusher); ok {
+					tw.Flush()
+				}
 			}
 		}
 		writeByte(p, '}')
@@ -142,7 +155,7 @@ func (p *printer) printValue(v reflect.Value, showType, quote bool) {
 		}
 		writeByte(p, '{')
 		if nonzero(v) {
-			expand := !canInline(v.Type())
+			expand := p.indented && !canInline(v.Type())
 			pp := p
 			if expand {
 				writeByte(p, '\n')
@@ -166,7 +179,9 @@ func (p *printer) printValue(v reflect.Value, showType, quote bool) {
 				}
 			}
 			if expand {
-				pp.tw.Flush()
+				if tw, ok := pp.tw.(flusher); ok {
+					tw.Flush()
+				}
 			}
 		}
 		writeByte(p, '}')
@@ -194,7 +209,7 @@ func (p *printer) printValue(v reflect.Value, showType, quote bool) {
 			break
 		}
 		writeByte(p, '{')
-		expand := !canInline(v.Type())
+		expand := p.indented && !canInline(v.Type())
 		pp := p
 		if expand {
 			writeByte(p, '\n')
@@ -210,7 +225,9 @@ func (p *printer) printValue(v reflect.Value, showType, quote bool) {
 			}
 		}
 		if expand {
-			pp.tw.Flush()
+			if tw, ok := pp.tw.(flusher); ok {
+				tw.Flush()
+			}
 		}
 		writeByte(p, '}')
 	case reflect.Ptr:
@@ -297,4 +314,9 @@ func getField(v reflect.Value, i int) reflect.Value {
 		val = val.Elem()
 	}
 	return val
+}
+
+// allows access to Flush() on *tabwriter.Writer
+type flusher interface {
+	Flush() error
 }

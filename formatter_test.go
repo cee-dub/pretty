@@ -8,8 +8,9 @@ import (
 )
 
 type test struct {
-	v interface{}
-	s string
+	v  interface{}
+	s  string
+	cs string
 }
 
 type LongStructTypeName struct {
@@ -34,46 +35,51 @@ func (f F) Format(s fmt.State, c rune) {
 var long = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 var gosyntax = []test{
-	{nil, `nil`},
-	{"", `""`},
-	{"a", `"a"`},
-	{1, "int(1)"},
-	{1.0, "float64(1)"},
-	{[]int(nil), "[]int(nil)"},
-	{[0]int{}, "[0]int{}"},
-	{complex(1, 0), "(1+0i)"},
+	{nil, `nil`, `nil`},
+	{"", `""`, `""`},
+	{"a", `"a"`, `"a"`},
+	{1, "int(1)", "int(1)"},
+	{1.0, "float64(1)", "float64(1)"},
+	{[]int(nil), "[]int(nil)", "[]int(nil)"},
+	{[0]int{}, "[0]int{}", "[0]int{}"},
+	{complex(1, 0), "(1+0i)", "(1+0i)"},
 	//{make(chan int), "(chan int)(0x1234)"},
-	{unsafe.Pointer(uintptr(1)), "unsafe.Pointer(0x1)"},
-	{func(int) {}, "func(int) {...}"},
-	{map[int]int{1: 1}, "map[int]int{1:1}"},
-	{int32(1), "int32(1)"},
-	{io.EOF, `&errors.errorString{s:"EOF"}`},
-	{[]string{"a"}, `[]string{"a"}`},
+	{unsafe.Pointer(uintptr(1)), "unsafe.Pointer(0x1)", "unsafe.Pointer(0x1)"},
+	{func(int) {}, "func(int) {...}", "func(int) {...}"},
+	{map[int]int{1: 1}, "map[int]int{1:1}", "map[int]int{1:1}"},
+	{int32(1), "int32(1)", "int32(1)"},
+	{io.EOF, `&errors.errorString{s:"EOF"}`, `&errors.errorString{s:"EOF"}`},
+	{[]string{"a"}, `[]string{"a"}`, `[]string{"a"}`},
 	{
 		[]string{long},
 		`[]string{"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}`,
+		`[]string{"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}`,
 	},
-	{F(5), "pretty.F(5)"},
+	{F(5), "pretty.F(5)", "pretty.F(5)"},
 	{
 		SA{&T{1, 2}},
 		`pretty.SA{
     t:  &pretty.T{x:1, y:2},
 }`,
+		`pretty.SA{t:&pretty.T{x:1, y:2}, v:pretty.T{x:3, y:4}}`,
 	},
 	{
 		map[int][]byte{1: []byte{}},
 		`map[int][]uint8{
     1:  {},
 }`,
+		`map[int][]uint8{1:{}}`,
 	},
 	{
 		map[int]T{1: T{}},
 		`map[int]pretty.T{
     1:  {},
 }`,
+		`map[int]pretty.T{1:{}}`,
 	},
 	{
 		long,
+		`"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"`,
 		`"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"`,
 	},
 	{
@@ -85,6 +91,7 @@ var gosyntax = []test{
     longFieldName:      pretty.LongStructTypeName{},
     otherLongFieldName: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
 }`,
+		`pretty.LongStructTypeName{longFieldName:pretty.LongStructTypeName{}, otherLongFieldName:"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}`,
 	},
 	{
 		&LongStructTypeName{
@@ -95,6 +102,7 @@ var gosyntax = []test{
     longFieldName:      &pretty.LongStructTypeName{},
     otherLongFieldName: (*pretty.LongStructTypeName)(nil),
 }`,
+		`&pretty.LongStructTypeName{longFieldName:&pretty.LongStructTypeName{}, otherLongFieldName:(*pretty.LongStructTypeName)(nil)}`,
 	},
 	{
 		[]LongStructTypeName{
@@ -113,6 +121,7 @@ var gosyntax = []test{
         otherLongFieldName: nil,
     },
 }`,
+		`[]pretty.LongStructTypeName{{}, {longFieldName:int(3), otherLongFieldName:int(3)}, {longFieldName:"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", otherLongFieldName:nil}}`,
 	},
 	{
 		[]interface{}{
@@ -130,6 +139,7 @@ var gosyntax = []test{
         otherLongFieldName: nil,
     },
 }`,
+		`[]interface {}{pretty.LongStructTypeName{}, []uint8{0x1, 0x2, 0x3}, pretty.T{x:3, y:4}, pretty.LongStructTypeName{longFieldName:"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", otherLongFieldName:nil}}`,
 	},
 }
 
@@ -140,6 +150,19 @@ func TestGoSyntax(t *testing.T) {
 			t.Errorf("expected %q", tt.s)
 			t.Errorf("got      %q", s)
 			t.Errorf("expraw\n%s", tt.s)
+			t.Errorf("gotraw\n%s", s)
+		}
+	}
+}
+
+func TestCompact(t *testing.T) {
+	for i, tt := range gosyntax {
+		s := fmt.Sprintf("%#-v", Formatter(tt.v))
+		if tt.cs != s {
+			t.Errorf("example %d", i+1)
+			t.Errorf("expected %q", tt.cs)
+			t.Errorf("got      %q", s)
+			t.Errorf("expraw\n%s", tt.cs)
 			t.Errorf("gotraw\n%s", s)
 		}
 	}
